@@ -46,6 +46,7 @@ float dnd_inicio = 22.0;
 float dnd_fim = 7.0;   
 bool tela_ligada = true;
 bool sincronizar_tela_app = false;
+bool display_conectado = false;
 
 // Flag crucial para tirar o peso do callback do RainMaker
 volatile int disparos_pendentes = 0; 
@@ -78,6 +79,7 @@ void getHoraAtual(char *buffer, size_t tamanho) {
 
 // --- FUNÇÃO DE DESENHO ---
 void atualizarTela(String titulo, String rodape = "", bool limpar = true) {
+    if (!display_conectado) return;
     if (!sessao_provisionamento_encerrada && titulo != "SETUP") return;
     if (!tela_ligada) return;
 
@@ -285,9 +287,12 @@ void setup()
     configTzTime("<-03>3", "pool.ntp.org", "time.nist.gov");
 
     if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
-        Serial.println(F("Erro OLED"));
+        Serial.println(F("Erro OLED - Display nao encontrado. Pulando interface visual."));
+        display_conectado = false;
+    } else {
+        display_conectado = true;
+        mostrarTelaPareamento(); 
     }
-    mostrarTelaPareamento(); 
 
     pinMode(gpio_reset, INPUT_PULLUP);
     pinMode(gpio_switch, OUTPUT);

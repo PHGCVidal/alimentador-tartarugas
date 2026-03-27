@@ -62,7 +62,7 @@ static int gpio_switch = 2;
 static int gpio_reset = 33;
 #endif
 
-static Switch *my_switch = NULL;
+static Device *my_switch = NULL;
 
 void getHoraAtual(char *buffer, size_t tamanho) {
     struct tm timeinfo;
@@ -277,7 +277,20 @@ void setup()
     Node my_node;
     my_node = RMaker.initNode("ESP RainMaker Node");
 
-    my_switch = new Switch("Switch", &gpio_switch);
+  // Cria o dispositivo genérico, mas avisa o App que ele se comporta como um Switch (para manter o ícone)
+    my_switch = new Device("Alimentador", ESP_RMAKER_DEVICE_SWITCH);
+    if (!my_switch) return;
+
+    // 1º DA LISTA: Quantidade de Porções (Será lido antes de ligar o motor)
+    Param qtd("Qtd Porcoes", ESP_RMAKER_PARAM_RANGE, value(qtd_porcoes), PROP_FLAG_READ | PROP_FLAG_WRITE);
+    qtd.addBounds(value(1), value(5), value(1)); 
+    qtd.addUIType(ESP_RMAKER_UI_SLIDER);
+    my_switch->addParam(qtd);
+
+    // 2º DA LISTA: Botão de Power (Será lido com a Qtd Porções já atualizada na memória)
+    Param power("Power", ESP_RMAKER_PARAM_POWER, value(DEFAULT_POWER_MODE), PROP_FLAG_READ | PROP_FLAG_WRITE);
+    power.addUIType(ESP_RMAKER_UI_TOGGLE);
+    my_switch->addParam(power);
     if (!my_switch) return;
     
     my_switch->addParam(Param("Ultima Refeicao", "esp.param.text", value("---"), PROP_FLAG_READ));
@@ -285,11 +298,6 @@ void setup()
     Param tela_sw("Tela LCD", ESP_RMAKER_PARAM_POWER, value(tela_ligada), PROP_FLAG_READ | PROP_FLAG_WRITE);
     tela_sw.addUIType(ESP_RMAKER_UI_TOGGLE);
     my_switch->addParam(tela_sw);
-
-    Param qtd("Qtd Porcoes", ESP_RMAKER_PARAM_RANGE, value(qtd_porcoes), PROP_FLAG_READ | PROP_FLAG_WRITE);
-    qtd.addBounds(value(1), value(5), value(1)); 
-    qtd.addUIType(ESP_RMAKER_UI_SLIDER);
-    my_switch->addParam(qtd);
 
     Param dnd_sw("Modo Noturno", ESP_RMAKER_PARAM_POWER, value(dnd_ativo), PROP_FLAG_READ | PROP_FLAG_WRITE);
     dnd_sw.addUIType(ESP_RMAKER_UI_TOGGLE);

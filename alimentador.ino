@@ -2,25 +2,21 @@
 #include "WiFi.h"
 #include "WiFiProv.h"
 #include "AppInsights.h"
-#include <Stepper.h> // <-- Substituído ESP32Servo por Stepper
+#include <Stepper.h> 
 #include "time.h"
 
-// --- DISPLAY ---
+// --- DISPLAY LCD 16x2 I2C ---
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
 // Prevenção de Brownout
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-
 // --- CONFIGURAÇÕES ---
 #define DEFAULT_POWER_MODE false 
-const char *service_name = "PROV_aromatizador";
+const char *service_name = "PROV_alimentador";
 const char *pop = "123456"; 
 
 // --- MECÂNICA (MOTOR DE PASSO 28BYJ-48) ---
@@ -34,8 +30,8 @@ const char *pop = "123456";
 // Inicializa o motor. IMPORTANTE: A sequência IN1, IN3, IN2, IN4 é necessária para o ULN2003
 Stepper meuMotor(PASSOS_POR_VOLTA, PINO_IN1, PINO_IN3, PINO_IN2, PINO_IN4);
 
-int qtd_disparos = 1; 
-char texto_ultimo_disparo[10] = "--:--";
+int qtd_porcoes = 1; 
+char texto_ultima_refeicao[10] = "--:--";
 
 // --- CONTROLES E FLAGS ---
 unsigned long momento_liberacao = 0; 
@@ -49,7 +45,7 @@ bool sincronizar_tela_app = false;
 bool display_conectado = false;
 
 // Flag crucial para tirar o peso do callback do RainMaker
-volatile int disparos_pendentes = 0; 
+volatile int porcoes_pendentes = 0; 
 
 // Trava de segurança do Display
 bool sessao_provisionamento_encerrada = false; 
@@ -77,75 +73,46 @@ void getHoraAtual(char *buffer, size_t tamanho) {
     strftime(buffer, tamanho, "%H:%M", &timeinfo);
 }
 
-// --- FUNÇÃO DE DESENHO ---
+// --- FUNÇÃO DE DESENHO (LCD) ---
 void atualizarTela(String titulo, String rodape = "", bool limpar = true) {
     if (!display_conectado) return;
     if (!sessao_provisionamento_encerrada && titulo != "SETUP") return;
     if (!tela_ligada) return;
 
-    if (limpar) display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.print(F("WrAIR")); 
-    display.setCursor(110, 0); 
-    if (WiFi.status() == WL_CONNECTED) display.print(F("(W)"));
-    else display.print(F("(!)"));
-    display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
+    if (limpar) lcd.clear();
 
     if (titulo == "ONLINE") {
         char horaBuff[10];
         getHoraAtual(horaBuff, sizeof(horaBuff));
 
-        display.setTextSize(3);
-        int len = strlen(horaBuff);
-        int x_hora = (128 - (len * 18)) / 2;
-        if(x_hora < 0) x_hora = 0;
-        
-        display.setCursor(x_hora, 22);
-        display.print(horaBuff);
+        // Linha de cima: WrFEED (W) 14:30
+        lcd.setCursor(0, 0);
+        lcd.print("WrFEED "); 
+        if (WiFi.status() == WL_CONNECTED) lcd.print("(W) ");
+        else lcd.print("(!) ");
+        lcd.print(horaBuff);
 
-        display.setTextSize(1);
-        display.setCursor(0, 54);
-        display.print(F("Ultimo: "));
-        display.print(texto_ultimo_disparo);
+        // Linha de baixo: Ultima: 14:30
+        lcd.setCursor(0, 1);
+        lcd.print("Ultima: ");
+        lcd.print(texto_ultima_refeicao);
     }
     else {
-        display.setTextSize(2);
-        int x_titulo = (128 - (titulo.length() * 12)) / 2;
-        if(x_titulo < 0) x_titulo = 0;
-
-        display.setCursor(x_titulo, 25);
-        display.print(titulo);
-
-        display.setTextSize(1);
-        display.setCursor(0, 54);
-        display.print(rodape);
+        // Telas de ação (Ex: ALIMENTANDO / Porcao 1/1)
+        lcd.setCursor(0, 0);
+        lcd.print(titulo);
+        lcd.setCursor(0, 1);
+        lcd.print(rodape);
     }
-
-    display.display();
 }
 
 void mostrarTelaPareamento() {
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    
-    display.setTextSize(1);
-    display.setCursor(0, 0); 
-    display.println("MODO PAREAMENTO");
-    display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
-
-    display.setCursor(0, 20);
-    display.println("Abra App RainMaker");
-    display.setCursor(0, 32);
-    display.println("No QRCode > BLE'");
-
-    display.setTextSize(2);
-    display.setCursor(0, 48);
-    display.print("POP:"); display.println(pop); 
-
-    display.display();
+    if (!display_conectado) return;
+    lcd.clear();
+    lcd.setCursor(0, 0); 
+    lcd.print("MODO PAREAMENTO");
+    lcd.setCursor(0, 1);
+    lcd.print("App > Add > BLE");
 }
 
 void sysProvEvent(arduino_event_t *sys_event) {
@@ -198,8 +165,6 @@ bool verificarPodeDisparar() {
     if (dentro) {
         if (sessao_provisionamento_encerrada) { 
             atualizarTela("BLOQUEADO", "Modo DND Ativo");
-            // Substituí delay(2000) por algo não bloqueante se chamado no callback, 
-            // mas como é só leitura de estado, o ideal é não travar o painel.
             char horaBuff[10]; 
             getHoraAtual(horaBuff, sizeof(horaBuff)); 
             atualizarTela("ONLINE", horaBuff); 
@@ -229,11 +194,8 @@ void write_callback(Device *device, Param *param, const param_val_t val, void *p
                 return; 
             }
 
-            // *** O SEGREDO ESTÁ AQUI ***
-            // Em vez de executar o motor de passo e travar o RainMaker, apenas avisamos
-            // o loop() que ele precisa fazer isso.
             digitalWrite(gpio_switch, HIGH);
-            disparos_pendentes = qtd_disparos;
+            porcoes_pendentes = qtd_porcoes;
             
             // Deixamos o botão "ligado" no app temporariamente. O loop() vai desligar quando terminar.
             param->updateAndReport(val);
@@ -243,24 +205,25 @@ void write_callback(Device *device, Param *param, const param_val_t val, void *p
             param->updateAndReport(val);
         }
     }
-    else if (strcmp(param_name, "Tela OLED") == 0) {
+    else if (strcmp(param_name, "Tela LCD") == 0) {
         tela_ligada = val.val.b;
-        if (tela_ligada) {
-            display.ssd1306_command(SSD1306_DISPLAYON);
-            if(sessao_provisionamento_encerrada) {
-                char horaTemp[10];
-                getHoraAtual(horaTemp, sizeof(horaTemp));
-                atualizarTela("ONLINE", horaTemp);
+        if (display_conectado) {
+            if (tela_ligada) {
+                lcd.backlight(); 
+                if(sessao_provisionamento_encerrada) {
+                    char horaTemp[10];
+                    getHoraAtual(horaTemp, sizeof(horaTemp));
+                    atualizarTela("ONLINE", horaTemp);
+                }
+            } else {
+                lcd.clear();
+                lcd.noBacklight(); 
             }
-        } else {
-            display.clearDisplay();
-            display.display();
-            display.ssd1306_command(SSD1306_DISPLAYOFF);
         }
         param->updateAndReport(val);
     }
-    else if (strcmp(param_name, "Qtd Sprays") == 0) {
-        qtd_disparos = val.val.i;
+    else if (strcmp(param_name, "Qtd Porcoes") == 0) {
+        qtd_porcoes = val.val.i;
         param->updateAndReport(val);
     }
     else if (strcmp(param_name, "Modo Noturno") == 0) {
@@ -286,12 +249,16 @@ void setup()
     Serial.begin(115200);
     configTzTime("<-03>3", "pool.ntp.org", "time.nist.gov");
 
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
-        Serial.println(F("Erro OLED - Display nao encontrado. Pulando interface visual."));
-        display_conectado = false;
-    } else {
+    Wire.begin();
+    Wire.beginTransmission(0x27); 
+    if (Wire.endTransmission() == 0) {
+        lcd.init();
+        lcd.backlight();
         display_conectado = true;
         mostrarTelaPareamento(); 
+    } else {
+        Serial.println(F("Erro LCD - Display I2C nao encontrado. Pulando interface visual."));
+        display_conectado = false;
     }
 
     pinMode(gpio_reset, INPUT_PULLUP);
@@ -313,13 +280,13 @@ void setup()
     my_switch = new Switch("Switch", &gpio_switch);
     if (!my_switch) return;
     
-    my_switch->addParam(Param("Ultimo Disparo", "esp.param.text", value("---"), PROP_FLAG_READ));
+    my_switch->addParam(Param("Ultima Refeicao", "esp.param.text", value("---"), PROP_FLAG_READ));
 
-    Param tela_sw("Tela OLED", ESP_RMAKER_PARAM_POWER, value(tela_ligada), PROP_FLAG_READ | PROP_FLAG_WRITE);
+    Param tela_sw("Tela LCD", ESP_RMAKER_PARAM_POWER, value(tela_ligada), PROP_FLAG_READ | PROP_FLAG_WRITE);
     tela_sw.addUIType(ESP_RMAKER_UI_TOGGLE);
     my_switch->addParam(tela_sw);
 
-    Param qtd("Qtd Sprays", ESP_RMAKER_PARAM_RANGE, value(qtd_disparos), PROP_FLAG_READ | PROP_FLAG_WRITE);
+    Param qtd("Qtd Porcoes", ESP_RMAKER_PARAM_RANGE, value(qtd_porcoes), PROP_FLAG_READ | PROP_FLAG_WRITE);
     qtd.addBounds(value(1), value(5), value(1)); 
     qtd.addUIType(ESP_RMAKER_UI_SLIDER);
     my_switch->addParam(qtd);
@@ -366,39 +333,36 @@ void loop()
     static bool primeira_leitura_feita = false; 
 
     // --- MÁQUINA DE ESTADO DO MOTOR DE PASSO ---
-    // Executamos o giro aqui no loop para não engasgar o servidor web interno do RainMaker
-    if (disparos_pendentes > 0 && sessao_provisionamento_encerrada) {
+    if (porcoes_pendentes > 0 && sessao_provisionamento_encerrada) {
         
-        atualizarTela("ATUANDO", "Spray...");
+        atualizarTela("ALIMENTANDO", "Aguarde...");
         
-        for (int i = 1; i <= disparos_pendentes; i++) {
-            String status = "SPRAY " + String(i) + "/" + String(disparos_pendentes);
+        for (int i = 1; i <= porcoes_pendentes; i++) {
+            String status = "PORCAO " + String(i) + "/" + String(porcoes_pendentes);
             atualizarTela(status, "Girando...");
             
-            // Dá UMA volta completa (2048 passos). Isso leva aprox. 4 segundos a 15 RPM.
             meuMotor.step(PASSOS_POR_VOLTA); 
 
             // IMPORTANTÍSSIMO: Desliga as bobinas do ULN2003 para o motor não derreter 
-            // e nem puxar corrente fantasma da sua fonte.
             digitalWrite(PINO_IN1, LOW);
             digitalWrite(PINO_IN2, LOW);
             digitalWrite(PINO_IN3, LOW);
             digitalWrite(PINO_IN4, LOW);
 
-            if (i < disparos_pendentes) {
+            if (i < porcoes_pendentes) {
                 delay(1500); 
             }
         }
 
         // --- FINALIZAÇÃO E ATUALIZAÇÃO DO APP ---
-        getHoraAtual(texto_ultimo_disparo, sizeof(texto_ultimo_disparo));
+        getHoraAtual(texto_ultima_refeicao, sizeof(texto_ultima_refeicao));
 
         if (my_switch) {
              struct tm timeinfo;
              if(getLocalTime(&timeinfo, 0)){
                   char timeStringBuff[50];
                   strftime(timeStringBuff, sizeof(timeStringBuff), "%d/%m as %H:%M", &timeinfo);
-                  my_switch->updateAndReportParam("Ultimo Disparo", timeStringBuff);
+                  my_switch->updateAndReportParam("Ultima Refeicao", timeStringBuff);
              }
              // Retorna o botão principal para OFF no aplicativo do celular
              my_switch->updateAndReportParam(ESP_RMAKER_DEF_POWER_NAME, false); 
@@ -406,7 +370,7 @@ void loop()
 
         digitalWrite(gpio_switch, LOW);
         momento_liberacao = millis() + TEMPO_COOLDOWN;
-        disparos_pendentes = 0; // Zera a fila
+        porcoes_pendentes = 0; // Zera a fila
         
         char horaTemp[10];
         getHoraAtual(horaTemp, sizeof(horaTemp));
@@ -416,7 +380,7 @@ void loop()
     if (sessao_provisionamento_encerrada && WiFi.status() == WL_CONNECTED) {
         
         if (sincronizar_tela_app) {
-            if (my_switch) my_switch->updateAndReportParam("Tela OLED", tela_ligada);
+            if (my_switch) my_switch->updateAndReportParam("Tela LCD", tela_ligada);
             sincronizar_tela_app = false;
         }
 
@@ -458,13 +422,15 @@ void loop()
                     
                     if (deve_estar_desligada) { 
                         tela_ligada = false;
-                        display.clearDisplay();
-                        display.display();
-                        display.ssd1306_command(SSD1306_DISPLAYOFF);
+                        if (display_conectado) {
+                            lcd.clear();
+                            lcd.noBacklight();
+                        }
                     } else { 
                         tela_ligada = true;
-                        display.ssd1306_command(SSD1306_DISPLAYON);
-                        
+                        if (display_conectado) {
+                            lcd.backlight();
+                        }
                         char horaTemp[10];
                         getHoraAtual(horaTemp, sizeof(horaTemp));
                         atualizarTela("ONLINE", horaTemp);

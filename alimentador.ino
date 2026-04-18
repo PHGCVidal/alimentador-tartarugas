@@ -27,7 +27,6 @@ const char *pop = "123456";
 #define PINO_IN3 27
 #define PINO_IN4 14
 
-// Inicializa o motor. IMPORTANTE: A sequência IN1, IN3, IN2, IN4 é necessária para o ULN2003
 Stepper meuMotor(PASSOS_POR_VOLTA, PINO_IN1, PINO_IN3, PINO_IN2, PINO_IN4);
 
 int qtd_porcoes = 1; 
@@ -44,10 +43,8 @@ bool tela_ligada = true;
 bool sincronizar_tela_app = false;
 bool display_conectado = false;
 
-// Flag crucial para tirar o peso do callback do RainMaker
 volatile int porcoes_pendentes = 0; 
 
-// Trava de segurança do Display
 bool sessao_provisionamento_encerrada = false; 
 unsigned long timestamp_fim_prov = 0;
 
@@ -92,7 +89,7 @@ void atualizarTela(String titulo, String rodape = "", bool limpar = true) {
         else lcd.print("(!) ");
         lcd.print(horaBuff);
 
-        // Linha de baixo: Ultima: 14:30
+        // Linha de baixo: Ultima:
         lcd.setCursor(0, 1);
         lcd.print("Ultima: ");
         lcd.print(texto_ultima_refeicao);
@@ -152,7 +149,6 @@ void write_callback(Device *device, Param *param, const param_val_t val, void *p
 
     if (strcmp(param_name, "Power") == 0) {
         if (val.val.b == true) {
-          // o motor segue funcionando 
             if (millis() < momento_liberacao) {
                 if(sessao_provisionamento_encerrada) {
                     atualizarTela("COOLDOWN", "Aguarde...");
@@ -164,7 +160,7 @@ void write_callback(Device *device, Param *param, const param_val_t val, void *p
             digitalWrite(gpio_switch, HIGH);
             porcoes_pendentes = qtd_porcoes;
             
-            // Deixamos o botão "ligado" no app temporariamente. O loop() vai desligar quando terminar.
+            // botão "ligado" no app temporariamente. O loop() vai desligar quando terminar.
             param->updateAndReport(val);
 
         } else {
@@ -355,7 +351,7 @@ void loop()
             
             meuMotor.step(PASSOS_POR_VOLTA); 
 
-            // IMPORTANTÍSSIMO: Desliga as bobinas do ULN2003 para o motor não derreter 
+            // Desliga as bobinas do ULN2003 
             digitalWrite(PINO_IN1, LOW);
             digitalWrite(PINO_IN2, LOW);
             digitalWrite(PINO_IN3, LOW);
